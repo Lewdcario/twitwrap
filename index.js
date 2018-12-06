@@ -1,11 +1,12 @@
 const fetch = require('node-fetch');
 const crypto = require('crypto');
-const { stringify } = require('querystring');
 const EventEmitter = require('events');
+const { stringify } = require('querystring');
+
 const newLineRegex = /\S/;
 const predicate = (a, b) => {
-	if (a[0] < b[0]) return -1;
-	if (a[0] > b[0]) return 1;
+	if (a < b) return -1;
+	if (a > b) return 1;
 	return 0;
 };
 
@@ -22,27 +23,28 @@ class Client extends EventEmitter {
 		this._verifyOptions();
 	}
 
-	_generateSignature(method, url, params, data) {
+	_generateSignature(method, url, params, data = {}) {
 		const obj = Object.assign({}, params);
-		if (data && typeof data.body !== 'undefined') Object.assign(obj, data.body);
-		if (data && typeof data.query !== 'undefined') Object.assign(obj, data.query);
+		if (typeof data.body !== 'undefined') Object.assign(obj, data.body);
+		if (typeof data.query !== 'undefined') Object.assign(obj, data.query);
 
-		const sorted = Object.entries(obj).sort(predicate);
+		const attr = new URLSearchParams(Object.entries(obj));
+		attr.sort();
 
-		const attr = sorted.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-		const final = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(attr)}`;
+		const final = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(attr.toString())}`;
+
 		const signKey = `${encodeURIComponent(this.consumer_secret)}&${encodeURIComponent(this.access_token_secret)}`;
 		const hash = crypto.createHmac('sha1', signKey).update(final).digest();
+
 		return hash.toString('base64');
 	}
 
 	_getToken() {
 		const credentials = Buffer.from(`${this.consumer_key}:${this.consumer_secret}`).toString('base64');
 		const OAuthURL = 'https://api.twitter.com/oauth2/token';
-		const body = stringify({ grant_type: 'client_credentials' });
 		return fetch(OAuthURL, {
 			method: 'POST',
-			body,
+			body: stringify({ grant_type: 'client_credentials' }),
 			headers: {
 				'Authorization': `Basic ${credentials}`,
 				'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
@@ -55,55 +57,56 @@ class Client extends EventEmitter {
 			})
 	}
 
-	async _makeRequest(endpoint, method = 'GET', options) {
+	_handleResponse(r, stream) {
+		if (!r.ok) throw Error(r.statusText);
+		if (!stream) return r.json();
+		let data = '';
+		r.body
+			.on('data', chunk => {
+				if (!chunk.includes('\n')) {
+					data += chunk;
+					return;
+				}
+				data += chunk;
+				const chunks = data.split('\n');
+				if (newLineRegex.test(chunks[0])) {
+					try {
+						const parsed = JSON.parse(chunks[0]);
+						this.emit('event', parsed);
+					}
+					catch (e) {
+						this.emit('error', `Error parsing chunk:${chunks[0]}`);
+					}
+				}
+				data = chunks.slice(1).join('\n');
+			})
+			.once('close', m => {
+				if (this.restart) {
+					this.emit('error', 'Stream endpoint restarting due to close:', m);
+					return this._makeRequest(endpoint, method, options);
+				}
+				this.emit('error', 'Endpoint closed', m);
+			})
+			.once('error', e => {
+				if (this.restart) {
+					this.emit('error', 'Stream endpoint restarting due to error:', e);
+					return this._makeRequest(endpoint, method, options);
+				}
+				this.emit('error', 'Endpoint errored', m);
+			})
+			.once('end', () => this.emit('end'));
+		return this;
+	}
+
+	async _makeRequest(endpoint, method = 'GET', options = {}, stream = false) {
 		if (!endpoint) throw Error('makeRequest: endpoint required');
 
 		const baseURL = 'https://api.twitter.com/1.1';
 		const streamURL = 'https://stream.twitter.com/1.1';
-		let url = endpoint === 'statuses/filter' ? `${streamURL}/${endpoint}.json` : `${baseURL}/${endpoint}.json`;
-
-		const callback = r => {
-			if (!r.ok) throw Error(r.statusText);
-			if (endpoint !== 'statuses/filter') return r.json();
-			let data = '';
-			r.body
-				.on('data', chunk => {
-					if (chunk.includes('\n')) {
-					data += chunk;
-						const chunks = data.split('\n');
-						if (newLineRegex.test(chunks[0])) {
-							try {
-								const parsed = JSON.parse(chunks[0]);
-								this.emit('event', parsed);
-							}
-							catch (e) {
-								this.emit('error', `Error parsing chunk:${chunks[0]}`);
-							}
-						}
-						data = chunks.slice(1).join('\n');
-					}
-					else data += chunk;
-				})
-				.once('close', m => {
-					if (this.restart) {
-						this.emit('error', 'Stream endpoint restarting due to close:', m);
-						return this._makeRequest(endpoint, method, options);
-					}
-					this.emit('error', 'Endpoint closed', m);
-				})
-				.once('error', e => {
-					if (this.restart) {
-						this.emit('error', 'Stream endpoint restarting due to error:', e);
-						return this._makeRequest(endpoint, method, options);
-					}
-					this.emit('error', 'Endpoint errored', m);
-				})
-				.once('end', () => this.emit('end'));
-				return this;
-		};
+		let url = stream ? `${streamURL}/${endpoint}.json` : `${baseURL}/${endpoint}.json`;
 
 		if (!this.basicAuth) {
-			const nonce = ((Math.random() * 1000000) + 5000).toFixed(0);
+			const nonce = ((Math.random() * 1000000)).toFixed(0) + ((Math.random() * 1000000)).toFixed(0);
 			const timestamp = (Date.now() / 1000).toFixed(0);
 			const params = {
 				oauth_consumer_key: this.consumer_key,
@@ -114,7 +117,6 @@ class Client extends EventEmitter {
 				oauth_version: '1.0'
 			};
 			params.oauth_signature = this._generateSignature(method, url, params, options);
-			if (options && typeof options.query !== 'undefined') url += `?${stringify(options.query)}`;
 
 			let auth = 'OAuth ';
 			const entries = Object.entries(params).sort(predicate);
@@ -130,6 +132,8 @@ class Client extends EventEmitter {
 			this.auth = `Bearer ${token}`;
 		}
 
+		if (typeof options.query !== 'undefined') url += `?${stringify(options.query)}`;
+
 		if (method === 'GET') {
 			return fetch(url, {
 				method,
@@ -137,7 +141,7 @@ class Client extends EventEmitter {
 					'Authorization': this.auth,
 					'Content-Type': 'application/json'
 				}
-			}).then(callback);
+			}).then(r => this._handleResponse(r, stream));
 		}
 		else if (method === 'POST') {
 			return fetch(url, {
@@ -147,7 +151,7 @@ class Client extends EventEmitter {
 					'Content-Type': 'application/x-www-form-urlencoded'
 				},
 				body: options && options.body ? stringify(options.body) : ''
-			}).then(callback);
+			}).then(r => this._handleResponse(r, stream));
 
 		}
 		else throw Error('makeRequest: only GET/POST methods are supported.');
@@ -157,8 +161,8 @@ class Client extends EventEmitter {
 		return this._makeRequest(endpoint, 'GET', options);
 	}
 
-	startStream(options = {}) {
-		return this._makeRequest('statuses/filter', 'POST', { body: options })
+	startStream(body = {}) {
+		return this._makeRequest('statuses/filter', 'POST', { body }, true);
 	}
 
 	_verifyOptions() {
