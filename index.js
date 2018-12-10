@@ -10,16 +10,70 @@ const predicate = (a, b) => {
 	return 0;
 };
 
+/**
+ * Options for a client.
+ * @typedef {Object} ClientOptions
+ * @property {boolean} [restart=true] Whether or not the client will attempt to automatically restart
+ * @property {string} [consumer_key] The consumer key
+ * @property {string} [consumer_secret] The consumer secret
+ * @property {string} [access_token_key] The access token
+ * @property {string} [access_token_secret] The access token secret
+ */
+
 class Client extends EventEmitter {
-	constructor(config) {
+	/**
+	 * @param {ClientOptions} config The options for the client
+	 */
+	constructor(config = {}) {
 		super();
+
+		/**
+		 * Whether or not the client should automatically attempt to restart
+		 * @type {boolean}
+		 */
 		this.restart = typeof config.restart !== 'undefined' ? config.restart : true;
+
+		/**
+		 * The consumer key of the client
+		 * @type {string}
+		 * @private
+		 */
 		this.consumer_key = config.consumer_key;
+
+		/**
+		 * The consumer secret of the client
+		 * @type {string}
+		 * @private
+		 */
 		this.consumer_secret = config.consumer_secret;
+
+		/**
+		 * The access token key of the client
+		 * @type {string}
+		 * @private
+		 */
 		this.access_token_key = config.access_token_key;
+
+		/**
+		 * The access token secret of the client
+		 * @type {string}
+		 * @private
+		 */
 		this.access_token_secret = config.access_token_secret;
+
+		/**
+		 * Whether or not the client is authenticated with basic authorization (not OAuth)
+		 * @type {boolean}
+		 */
 		this.basicAuth = Boolean(this.consumer_key && this.consumer_secret && !this.access_token_key && !this.access_token_secret);
+
+		/**
+		 * The authorization parameter for the client
+		 * @type {?string}
+		 * @private
+		 */
 		this.auth = null;
+
 		this._verifyOptions();
 	}
 
@@ -160,10 +214,22 @@ class Client extends EventEmitter {
 		else throw Error('makeRequest: only GET/POST methods are supported.');
 	}
 
-	get(endpoint, options) {
+	/**
+	 * Makes a GET request to twitter with the provided endpoint and options
+	 * @param {string} endpoint The endpoint to perform a request to
+	 * @param {object} [options={}] Request options to provide
+	 * @returns {Promise<object>} The request response object
+	 */
+	get(endpoint, options = {}) {
+		if (typeof endpoint === 'undefined') throw Error('get: missing endpoint');
 		return this._makeRequest(endpoint, 'GET', options);
 	}
 
+	/**
+	 * Start streaming statuses realtime with the provided options
+	 * @param {object} [body={}] Request options to provide
+	 * @returns {Promise<this>} The current client instance
+	 */
 	startStream(body = {}) {
 		return this._makeRequest('statuses/filter', 'POST', { body }, true);
 	}
