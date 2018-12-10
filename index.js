@@ -13,7 +13,7 @@ const predicate = (a, b) => {
 class Client extends EventEmitter {
 	constructor(config) {
 		super();
-		this.restart = typeof config.restart === 'undefined' ? config.restart : true;
+		this.restart = typeof config.restart !== 'undefined' ? config.restart : true;
 		this.consumer_key = config.consumer_key;
 		this.consumer_secret = config.consumer_secret;
 		this.access_token_key = config.access_token_key;
@@ -80,9 +80,9 @@ class Client extends EventEmitter {
 				}
 				data = chunks.slice(1).join('\n');
 			})
-			.once('close', m => {
+			.once('close', () => {
 				if (this.restart) {
-					this.emit('error', 'Stream endpoint restarting due to close:', m);
+					this.emit('error', 'Stream endpoint restarting due to close');
 					return this._makeRequest(endpoint, method, options);
 				}
 				this.emit('error', 'Endpoint closed', m);
@@ -94,7 +94,10 @@ class Client extends EventEmitter {
 				}
 				this.emit('error', 'Endpoint errored', m);
 			})
-			.once('end', () => this.emit('end'));
+			.once('end', () => {
+				this.emit('debug', 'Stream endpoint closed');
+			});
+
 		return this;
 	}
 
