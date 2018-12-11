@@ -1,4 +1,4 @@
-# twitter.js
+# twitwrap
 Wrapper for the Twitter API
 
 ## Disclaimer

@@ -1,5 +1,5 @@
 {
-  "name": "twitter.js",
+  "name": "twitwrap",
   "version": "1.0.0",
   "description": "Twitter API wrapper",
   "main": "index.js",
