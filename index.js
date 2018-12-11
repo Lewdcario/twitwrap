@@ -9,6 +9,9 @@ const predicate = (a, b) => {
 	if (a > b) return 1;
 	return 0;
 };
+const baseURL = 'https://api.twitter.com/1.1';
+const streamURL = 'https://stream.twitter.com/1.1';
+const OAuthURL = 'https://api.twitter.com/oauth2/token';
 
 /**
  * Options for a client.
@@ -95,7 +98,7 @@ class Client extends EventEmitter {
 
 	_getToken() {
 		const credentials = Buffer.from(`${this.consumer_key}:${this.consumer_secret}`).toString('base64');
-		const OAuthURL = 'https://api.twitter.com/oauth2/token';
+
 		return fetch(OAuthURL, {
 			method: 'POST',
 			body: stringify({ grant_type: 'client_credentials' }),
@@ -158,8 +161,6 @@ class Client extends EventEmitter {
 	async _makeRequest(endpoint, method = 'GET', options = {}, stream = false) {
 		if (!endpoint) throw Error('makeRequest: endpoint required');
 
-		const baseURL = 'https://api.twitter.com/1.1';
-		const streamURL = 'https://stream.twitter.com/1.1';
 		let url = stream ? `${streamURL}/${endpoint}.json` : `${baseURL}/${endpoint}.json`;
 
 		if (!this.basicAuth) {
@@ -221,7 +222,6 @@ class Client extends EventEmitter {
 	 * @returns {Promise<object>} The request response object
 	 */
 	get(endpoint, options = {}) {
-		if (typeof endpoint === 'undefined') throw Error('get: missing endpoint');
 		return this._makeRequest(endpoint, 'GET', options);
 	}
 
